@@ -22,6 +22,7 @@
   .legend-grid { display: flex; flex-wrap: wrap; gap: 10px; }
   .legend-item { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #555; }
   .dot { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; }
+  .guidance { background: #fffbe6; border-left: 4px solid #FF7E00; border-radius: 8px; padding: 12px 16px; margin-bottom: 1.5rem; font-size: 13px; color: #3a3a3a; line-height: 1.6; }
   .footer { font-size: 14px; color: #FF0000; text-align: center; margin-top: 1.5rem; }
   .map-row { display: flex; gap: 14px; margin-bottom: 1.5rem; align-items: stretch; }
   #map { width: 50%; height: 520px; border-radius: 12px; border: 1px solid #e8e8e5; flex-shrink: 0; }
@@ -107,6 +108,11 @@ document.addEventListener("DOMContentLoaded", () => {
 
 <h1>Ozone Pollution Forecast for Environmental Justice Communities in Washington DC Metro Area</h1>
 <p class="subtitle"><span id="forecast-date"></span></p>
+
+<div class="guidance">
+  Check the monitoring location closest to where you live, work, or go to school. On days when air quality is Code Orange (Unhealthy for Sensitive Groups) or worse, consider limiting prolonged outdoor activity — especially for children, elderly, and those with asthma or heart conditions.
+</div>
+
 <div class="grid" id="forecast-grid"></div>
 
 <div class="map-row">
@@ -126,7 +132,7 @@ document.addEventListener("DOMContentLoaded", () => {
   </div>
 </div>
 
-<p class="footer">Disclaimer — This forecast is an independent research project created by a high school student to raise awareness of air quality conditions in environmental justice communities in the DC Metro Area. It is not an official forecast and has not been reviewed or endorsed by the EPA, DOEE, MDE, DEQ, MWCOG, or any other government agency &nbsp;·&nbsp; For official forecasts visit <a href="https://www.cleanairpartners.net">Clean Air Partners</a></p>
+<p class="footer">Disclaimer — This forecast is an independent research project created by a high school student to raise awareness of air quality conditions in environmental justice communities in the DC Metro Area. It is not an official forecast, has not been peer reviewed, and has not been endorsed by the EPA, DOEE, MDE, DEQ, MWCOG, or any government agency. Results may differ from official monitoring data. This site is intended for educational purposes only and should not be used as a substitute for official air quality guidance. &nbsp;·&nbsp; For official forecasts visit <a href="https://www.cleanairpartners.net">Clean Air Partners</a></p>
 
 </body>
 </html>
