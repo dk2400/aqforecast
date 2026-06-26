@@ -11,7 +11,7 @@ Runs at 2 AM daily via cron. Correct data sequence per site:
   Day -1 (yesterday) met               →  observed met for Day -1 rows
   Day  0 (today) met                   →  forecast met for Day 0 rows
   48-row input (Day -1 + Day 0) fed into sliding-window RF model
-  → predicts today's hourly ozone → peak ppb → AQI category
+  → predicts today's hourly ozone → max 8-hour average → AQI/category
   → updates index.html → pushes to GitHub Pages
 
 Setup
@@ -451,15 +451,8 @@ def predict_site(site: dict, df: pd.DataFrame) -> dict:
         "Date Local", "Time Local", "DateTime"
     ])
 
-    # NUMERIC_COLS must match training order exactly
-    numeric_cols = [
-        "Wind Direction - Resultant", "Wind Speed - Resultant",
-        "Temp", "Press", "RH", "Lag Ozone",
-        "Year", "Month", "Day", "Hour",
-    ]
-
     # Drop rows with NaN in feature cols (today's Ozone=NaN is fine; it's not a feature)
-    data = data.dropna(subset=numeric_cols).reset_index(drop=True)
+    data = data.dropna(subset=NUMERIC_COLS).reset_index(drop=True)
 
     if len(data) < WINDOW_SIZE:
         raise RuntimeError(
@@ -467,7 +460,7 @@ def predict_site(site: dict, df: pd.DataFrame) -> dict:
             f"need {WINDOW_SIZE}, got {len(data)}"
         )
 
-    X = create_sliding_windows(data, numeric_cols, WINDOW_SIZE)
+    X = create_sliding_windows(data, NUMERIC_COLS, WINDOW_SIZE)
     log.info(f"  Sliding windows: X.shape={X.shape}")
 
 #   Chatgpt line- log.info(f"Sliding windows for {site['name']}: X.shape={X.shape}")
@@ -512,7 +505,7 @@ def predict_site(site: dict, df: pd.DataFrame) -> dict:
 #  Step 5 — Update index.html
 # ============================================================
 def update_index_html(html: str, today: date,
-                      categories: dict) -> str:
+                      results: dict) -> str:
     """
     Replace the DATE and FORECAST lines in the EDIT ONLY section.
     categories = { "McMillan": "moderate", "Rockville": "good", ... }
@@ -591,8 +584,8 @@ def main():
 
 #    categories = {}
 
-#    for site in SITES:
-#        log.info(f"--- Processing {site['name']} ---")
+    for site in SITES:
+        log.info(f"--- Processing {site['name']} ---")
 #       try:
 #            # Step 2+3: fetch met + assemble 48-row input with correct lag
 #            df = build_site_input(
@@ -608,9 +601,6 @@ def main():
 #            log.error(traceback.format_exc())
 #            categories[site["name"]] = "moderate"   # safe fallback
 #    log.info(f"Final categories: {categories}")
-
-  for site in SITES:
-        log.info(f"--- Processing {site['name']} ---")
 
         try:
             df = build_site_input(
