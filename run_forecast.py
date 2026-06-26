@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Automated Daily Ozone Forecast Pipeline
+Updated to calculate ozone AQI using official-style max 8-hour average method.
 ========================================
 Runs at 2 AM daily via cron. Correct data sequence per site:
 
@@ -31,29 +32,33 @@ Setup
        0 2 * * * /usr/bin/python3 /path/to/run_forecast.py >> /path/to/forecast.log 2>&1
 """
 
-# ============================================================
-#  CONFIG — fill these in once
-# ============================================================
 import os
-AIRNOW_API_KEY   = os.environ.get("AIRNOW_API_KEY", "5313DE41-540E-4C8F-8F68-196E4E0303FB")
-GITHUB_TOKEN     = os.environ.get("GITHUB_TOKEN", "YOUR_NEW_GITHUB_TOKEN")  # ← paste your new token here for local testing only
-GITHUB_REPO      = "dk2400/aqforecast"
-INDEX_HTML_PATH  = "index.html"
-MODEL_DIR        = os.path.dirname(os.path.abspath(__file__))  # same folder as this script
-# ============================================================
-
 import sys
 import io
+import re
 import urllib.request
 import logging
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
+
+# from datetime import date, datetime, timedelta
 
 import numpy as np
 import pandas as pd
 import requests
 import joblib
 from github import Github, Auth
+
+# ============================================================
+#  CONFIG — fill these in once
+# ============================================================
+AIRNOW_API_KEY   = os.environ.get("AIRNOW_API_KEY", "5313DE41-540E-4C8F-8F68-196E4E0303FB")
+GITHUB_TOKEN     = os.environ.get("GITHUB_TOKEN", "YOUR_NEW_GITHUB_TOKEN")  # ← paste your new token here for local testing only
+GITHUB_REPO      = "dk2400/aqforecast"
+INDEX_HTML_PATH  = "index.html"
+MODEL_DIR        = os.path.dirname(os.path.abspath(__file__))  # same folder as this script
+
+WINDOW_SIZE = 24   # sliding window size used during training
 
 logging.basicConfig(
     level=logging.INFO,
@@ -122,25 +127,63 @@ NUMERIC_COLS = [
     "Year", "Month", "Day", "Hour",
 ]
 
-WINDOW_SIZE = 24  # sliding window size used during training
+# WINDOW_SIZE = 24  # sliding window size used during training
 
 # ============================================================
 #  AQI breakpoints for ozone (ppb)
 # ============================================================
-def ppb_to_aqi_category(peak_ppb: float) -> str:
-    """Map peak predicted ozone (ppb) to AQI category keyword used in index.html."""
-    if peak_ppb < 55:
-        return "good"
-    elif peak_ppb < 71:
-        return "moderate"
-    elif peak_ppb < 86:
-        return "usg"
-    elif peak_ppb < 106:
-        return "unhealthy"
-    elif peak_ppb < 200:
-        return "very"
-    else:
-        return "hazardous"
+
+def truncate_ozone_ppm(ppb: float) -> float:
+    """
+    EPA AQI tables use ozone concentration in ppm, truncated to 3 decimals.
+    Example: 70.9 ppb = 0.0709 ppm → 0.070 ppm.
+    """
+    ppm = ppb / 1000.0
+    return np.floor(ppm * 1000) / 1000
+
+
+def ozone_8hr_aqi_from_ppb(max_8hr_ppb: float):
+    """
+    Convert max 8-hour ozone concentration to AQI.
+
+    Breakpoints are in ppm because EPA ozone AQI tables are ppm-based.
+    Category keywords match your website:
+      good, moderate, usg, unhealthy, very, hazardous
+    """
+
+    c = truncate_ozone_ppm(max_8hr_ppb)
+
+    breakpoints = [
+        (0.000, 0.054, 0,   50,  "good"),
+        (0.055, 0.070, 51,  100, "moderate"),
+        (0.071, 0.085, 101, 150, "usg"),
+        (0.086, 0.105, 151, 200, "unhealthy"),
+        (0.106, 0.200, 201, 300, "very"),
+    ]
+
+    for c_low, c_high, i_low, i_high, category in breakpoints:
+        if c_low <= c <= c_high:
+            aqi = ((i_high - i_low) / (c_high - c_low)) * (c - c_low) + i_low
+            return round(aqi), category, c
+    # 8-hour ozone breakpoints do not formally define AQI above 300.
+    # For your website fallback, mark it hazardous if beyond 0.200 ppm.
+    return 301, "hazardous", c
+
+
+def calculate_max_8hr_ozone(today_preds_ppb: np.ndarray):
+    """
+    Calculate max rolling 8-hour average from 24 hourly predicted ozone values.
+    Returns:
+      max_8hr_ppb, starting_hour, ending_hour
+    """
+    s = pd.Series(today_preds_ppb)
+    rolling_8hr = s.rolling(window=8).mean()
+
+    max_8hr_ppb = float(rolling_8hr.max())
+    ending_hour = int(rolling_8hr.idxmax())
+    starting_hour = ending_hour - 7
+
+    return max_8hr_ppb, starting_hour, ending_hour
 
 # ============================================================
 #  Step 1 — Fetch ozone from AirNow
@@ -187,7 +230,6 @@ def fetch_airnow_ozone(day: date) -> pd.DataFrame:
     df["ozone_ppm"] = df["Value"] / 1000.0   # AirNow returns ppb; model trained on ppm
     log.info(f"  Got ozone rows per site: { df.groupby('site_num')['hour'].count().to_dict() }")
     return df[["site_num", "hour", "ozone_ppm"]]
-
 
 # ============================================================
 #  Step 2 — Fetch meteorology from Open-Meteo
@@ -373,7 +415,9 @@ def create_sliding_windows(data: pd.DataFrame, features: list,
     return np.array(X)
 
 
-def predict_site(site: dict, df: pd.DataFrame) -> float:
+# def predict_site(site: dict, df: pd.DataFrame) -> float:
+
+def predict_site(site: dict, df: pd.DataFrame) -> dict:
     """
     Replicates the predictor script exactly:
       1. Parse DateTime from Date Local + Time Local
@@ -426,16 +470,43 @@ def predict_site(site: dict, df: pd.DataFrame) -> float:
     X = create_sliding_windows(data, numeric_cols, WINDOW_SIZE)
     log.info(f"  Sliding windows: X.shape={X.shape}")
 
+#   Chatgpt line- log.info(f"Sliding windows for {site['name']}: X.shape={X.shape}")
+
     y_pred_ppm = pipeline.predict(X)
     y_pred_ppb = y_pred_ppm * 1000.0
 
     # Last 24 predictions correspond to today's hours (rows 24-47 after windowing)
-    today_preds = y_pred_ppb[-24:] if len(y_pred_ppb) >= 24 else y_pred_ppb
-    peak_ppb = float(np.max(today_preds))
-    log.info(f"  Peak predicted ozone for {site['name']}: {peak_ppb:.1f} ppb  "
-             f"(hourly range: {today_preds.min():.1f}–{today_preds.max():.1f} ppb)")
-    return peak_ppb
+    # today_preds = y_pred_ppb[-24:] if len(y_pred_ppb) >= 24 else y_pred_ppb
 
+    today_preds_ppb = y_pred_ppb[-24:]
+
+    peak_hourly_ppb = float(np.max(today_preds_ppb))
+
+    max_8hr_ppb, start_hour, end_hour = calculate_max_8hr_ozone(today_preds_ppb)
+
+    aqi, category, truncated_ppm = ozone_8hr_aqi_from_ppb(max_8hr_ppb)
+
+    log.info(
+        f"{site['name']} | "
+        f"Peak hourly={peak_hourly_ppb:.1f} ppb | "
+        f"Max 8-hr={max_8hr_ppb:.1f} ppb | "
+        f"Truncated={truncated_ppm:.3f} ppm | "
+        f"AQI={aqi} | Category={category} | "
+        f"8-hr window={start_hour}:00-{end_hour}:00"
+    )
+
+    return {
+        "site_name": site["name"],
+        "display": site["display"],
+        "hourly_predictions_ppb": today_preds_ppb.tolist(),
+        "peak_hourly_ppb": peak_hourly_ppb,
+        "max_8hr_ppb": max_8hr_ppb,
+        "max_8hr_start_hour": start_hour,
+        "max_8hr_end_hour": end_hour,
+        "truncated_8hr_ppm": truncated_ppm,
+        "aqi": aqi,
+        "category": category,
+    }
 
 # ============================================================
 #  Step 5 — Update index.html
@@ -446,17 +517,20 @@ def update_index_html(html: str, today: date,
     Replace the DATE and FORECAST lines in the EDIT ONLY section.
     categories = { "McMillan": "moderate", "Rockville": "good", ... }
     """
-    import re
-
     # Update date string
     date_str = f"{today.month}/{today.day}/{today.year}"
     html = re.sub(r'const DATE\s*=\s*"[^"]*"', f'const DATE = "{date_str}"', html)
 
     # Update each site's category in the FORECAST array
     for site in SITES:
-        display = site["display"].replace("'", "\\'")
-        cat = categories[site["name"]]
-        # Match:  { name: "...", location: "...", category: "old" }
+#        display = site["display"].replace("'", "\\'")
+#        cat = categories[site["name"]]
+
+        site_result = results[site["name"]]
+        cat = site_result["category"]
+
+# Match:  { name: "...", location: "...", category: "old" }
+
         pattern = (
             r'(\{\s*name:\s*"' + re.escape(site["display"]) +
             r'"[^}]+category:\s*")[^"]*(")'
@@ -465,7 +539,6 @@ def update_index_html(html: str, today: date,
         html = re.sub(pattern, replacement, html)
 
     return html
-
 
 # ============================================================
 #  Step 6 — Push to GitHub
@@ -514,29 +587,71 @@ def main():
         log.error(f"Failed to fetch Day -1 AirNow ozone: {e}")
         sys.exit(1)
 
-    categories = {}
+    results = {}
 
-    for site in SITES:
+#    categories = {}
+
+#    for site in SITES:
+#        log.info(f"--- Processing {site['name']} ---")
+#       try:
+#            # Step 2+3: fetch met + assemble 48-row input with correct lag
+#            df = build_site_input(
+#                site, day_minus_2, yesterday, today, ozone_d2, ozone_d1
+#            )
+#            # Step 4: predict
+#            peak = predict_site(site, df)
+#            cat  = ppb_to_aqi_category(peak)
+#            log.info(f"  AQI category → {cat}")
+#            categories[site["name"]] = cat
+#        except Exception as e:
+#            log.error(f"Error processing {site['name']}: {e}")
+#            log.error(traceback.format_exc())
+#            categories[site["name"]] = "moderate"   # safe fallback
+#    log.info(f"Final categories: {categories}")
+
+  for site in SITES:
         log.info(f"--- Processing {site['name']} ---")
+
         try:
-            # Step 2+3: fetch met + assemble 48-row input with correct lag
             df = build_site_input(
-                site, day_minus_2, yesterday, today, ozone_d2, ozone_d1
+                site=site,
+                day_minus_2=day_minus_2,
+                yesterday=yesterday,
+                today=today,
+                ozone_d2=ozone_d2,
+                ozone_d1=ozone_d1,
             )
-            # Step 4: predict
-            peak = predict_site(site, df)
-            cat  = ppb_to_aqi_category(peak)
-            log.info(f"  AQI category → {cat}")
-            categories[site["name"]] = cat
+
+            result = predict_site(site, df)
+            results[site["name"]] = result
+
         except Exception as e:
             log.error(f"Error processing {site['name']}: {e}")
             log.error(traceback.format_exc())
-            categories[site["name"]] = "moderate"   # safe fallback
 
-    log.info(f"Final categories: {categories}")
+            results[site["name"]] = {
+                "site_name": site["name"],
+                "display": site["display"],
+                "hourly_predictions_ppb": [],
+                "peak_hourly_ppb": None,
+                "max_8hr_ppb": None,
+                "max_8hr_start_hour": None,
+                "max_8hr_end_hour": None,
+                "truncated_8hr_ppm": None,
+                "aqi": None,
+                "category": "moderate",
+            }
+
+    log.info("Final results:")
+    for site_name, result in results.items():
+        log.info(
+            f"{site_name}: AQI={result['aqi']}, "
+            f"Category={result['category']}, "
+            f"Max8hr={result['max_8hr_ppb']}"
+        )
 
     # Step 5 — Fetch current index.html from GitHub
-    log.info("Fetching index.html from GitHub …")
+#    log.info("Fetching index.html from GitHub …")
     try:
         g    = Github(auth=Auth.Token(GITHUB_TOKEN))
         repo = g.get_repo(GITHUB_REPO)
@@ -547,7 +662,8 @@ def main():
         sys.exit(1)
 
     # Step 6 — Update HTML and push
-    updated_html = update_index_html(html, today, categories)
+#    updated_html = update_index_html(html, today, categories)
+    updated_html = update_index_html(html, today, results)
     try:
         push_to_github(updated_html)
     except Exception as e:
