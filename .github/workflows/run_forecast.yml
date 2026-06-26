@@ -2,8 +2,8 @@ name: Daily Ozone Forecast
 
 on:
   schedule:
-    - cron: '0 7 * * *'
-  workflow_dispatch:
+    - cron: '0 6 * * *'   # 2:00 AM Eastern = 6:00 AM UTC (EDT summer time)
+  workflow_dispatch:        # allows you to trigger it manually from GitHub anytime
 
 jobs:
   forecast:
@@ -11,16 +11,16 @@ jobs:
 
     steps:
       - name: Check out repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Install dependencies
         run: |
-          pip install requests pandas openpyxl joblib scikit-learn==1.6.1 numpy PyGithub
+          pip install requests pandas openpyxl joblib==1.5.3 scikit-learn==1.6.1 numpy PyGithub
 
       - name: Run forecast pipeline
         env:
