@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Automated Daily Ozone Forecast Pipeline
-Updated to calculate ozone AQI using official-style max 8-hour average method.
+Calculates ozone AQI using official-style max 8-hour average method.
 ========================================
 Runs at 2 AM daily via cron. Correct data sequence per site:
 
@@ -586,22 +586,6 @@ def main():
 
     for site in SITES:
         log.info(f"--- Processing {site['name']} ---")
-#       try:
-#            # Step 2+3: fetch met + assemble 48-row input with correct lag
-#            df = build_site_input(
-#                site, day_minus_2, yesterday, today, ozone_d2, ozone_d1
-#            )
-#            # Step 4: predict
-#            peak = predict_site(site, df)
-#            cat  = ppb_to_aqi_category(peak)
-#            log.info(f"  AQI category → {cat}")
-#            categories[site["name"]] = cat
-#        except Exception as e:
-#            log.error(f"Error processing {site['name']}: {e}")
-#            log.error(traceback.format_exc())
-#            categories[site["name"]] = "moderate"   # safe fallback
-#    log.info(f"Final categories: {categories}")
-
         try:
             df = build_site_input(
                 site=site,
