@@ -2,9 +2,9 @@ name: Daily Ozone Forecast
 
 on:
   schedule:
-    - cron: "0 6 * * *"   # 6:00 AM EDT (5:00 AM EST)
+    - cron: "0 10 * * *"
   workflow_dispatch:
-  
+
 permissions:
   contents: write
 
@@ -13,16 +13,8 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check out repo with Git LFS
+      - name: Check out repo
         uses: actions/checkout@v5
-        with:
-          lfs: true
-          fetch-depth: 0
-
-      - name: Pull Git LFS files
-        run: |
-          git lfs install
-          git lfs pull
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -33,6 +25,13 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests pandas==1.5.3 openpyxl joblib==1.2.0 scikit-learn==1.2.2 numpy==1.26.4 scipy==1.10.1 PyGithub
+
+      - name: Download model files
+        run: |
+          curl -L -o Site43_2017-22_RF_LagO3_Overlapping.joblib https://github.com/dk2400/aqforecast/releases/download/models-v1/Site43_2017-22_RF_LagO3_Overlapping.joblib
+          curl -L -o Site3001_2017-22_RF_LagO3_Overlapping.joblib https://github.com/dk2400/aqforecast/releases/download/models-v1/Site3001_2017-22_RF_LagO3_Overlapping.joblib
+          curl -L -o Site30_2017-22_RF_LagO3_Overlapping.joblib https://github.com/dk2400/aqforecast/releases/download/models-v1/Site30_2017-22_RF_LagO3_Overlapping.joblib
+          curl -L -o Site8003_2017-22_RF_LagO3_Overlapping.joblib https://github.com/dk2400/aqforecast/releases/download/models-v1/Site8003_2017-22_RF_LagO3_Overlapping.joblib
 
       - name: Run forecast pipeline
         env:
