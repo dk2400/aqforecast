@@ -1,0 +1,33 @@
+name: Export AirNow 2023 Suburban DC ozone forecasts
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download official historical forecasts
+        env:
+          AIRNOW_API_KEY: ${{ secrets.AIRNOW_API_KEY }}
+        run: python download_airnow_suburban_dc_2023.py
+
+      - name: Upload CSV files
+        uses: actions/upload-artifact@v4
+        with:
+          name: suburban-dc-ozone-forecasts-2023
+          path: output/
+          if-no-files-found: error
