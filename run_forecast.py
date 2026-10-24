@@ -93,7 +93,7 @@ SITES = [
     },
     {
         "name":        "Beltsville",
-        "display":     "Beltsville",
+        "display":     "HU-Beltsville",
         "state_code":  24,
         "county_code": 33,
         "site_num":    30,
