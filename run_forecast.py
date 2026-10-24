@@ -613,7 +613,7 @@ def main():
                 "max_8hr_end_hour": None,
                 "truncated_8hr_ppm": None,
                 "aqi": None,
-                "category": "moderate",
+                "category": "good",
             }
 
     log.info("Final results:")
